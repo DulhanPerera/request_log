@@ -16,7 +16,7 @@ def read_api_config() -> str:
         FileNotFoundError: If config file is missing
         ValueError: If config is invalid or URL malformed
     """
-    config_path = get_filePath("apiConfig")
+    config_path = get_filePath("databaseConfig")
     
     # Validate file existence
     if not config_path or not config_path.is_file():
