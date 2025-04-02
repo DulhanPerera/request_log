@@ -1,1 +1,1 @@
-# Call Create a Case API
+# Request Log - Keeps the data temporary inside the Mongo DB
