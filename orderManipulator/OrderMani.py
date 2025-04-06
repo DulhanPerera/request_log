@@ -3,7 +3,7 @@ from utils.database.connectMongoDB import get_mongo_collection
 from .caseRegistration import IncidentProcessor
 from utils.logger.logger import get_logger
 
-logger = get_logger("OrderProcessor")
+logger = get_logger("task_status_logger")
 
 class OrderProcessor:
     def __init__(self):
@@ -14,28 +14,52 @@ class OrderProcessor:
 
     def process_case(self, account_number, incident_id):
         """
-        Process customer details for case registration
+        Process customer details for case registration and update MongoDB on success
         """
         logger.info(f"Processing case for account: {account_number}, incident: {incident_id}")
         
-        # Create and process incident
         processor = IncidentProcessor(
             account_num=account_number,
             incident_id=incident_id,
             mongo_collection=self.collection
         )
         
-        return processor.process_incident()
+        success, response = processor.process_incident()
+        
+        if success:
+            update_result = self.collection.update_one(
+                {
+                    "$or": [
+                        {"account_number": account_number},
+                        {"account_num": account_number}
+                    ],
+                    "parameters.incident_id": incident_id,
+                    "request_status": "Open"
+                },
+                {
+                    "$set": {
+                        "request_status": "Completed",
+                        "completed_at": time.time(),
+                        "api_response": response
+                    }
+                }
+            )
+            
+            if update_result.modified_count == 1:
+                logger.info(f"Successfully updated document for account {account_number}")
+                return True
+            else:
+                logger.warning(f"Failed to update document for account {account_number}")
+                return False
+        return False
 
     def get_open_orders(self):
-        """Get all open orders including _id for logging purposes"""
+        """Get all open orders from the MongoDB collection"""
         return list(self.collection.find({"request_status": "Open"}))
 
     def process_option_1(self, documents):
         """
         Process documents for option 1 while ignoring _id field
-        Args:
-            documents: List of MongoDB documents (may contain _id)
         Returns:
             Tuple: (processed_count, error_count)
         """
@@ -44,35 +68,29 @@ class OrderProcessor:
         
         for doc in documents:
             try:
-                # Retain _id for logging purposes
                 doc_id = doc.get('_id', 'NO_ID')
                 
-                # Create a clean copy without _id for processing
-                doc_data = {k: v for k, v in doc.items() if k != '_id'}
-                
-                # Skip if not the right order_id
-                if doc_data.get('order_id') != 1:
+                if doc.get('order_id') != 1:
                     continue
                     
-                # Extract required fields
-                account_number = doc_data.get('account_number') or doc_data.get('account_num')
-                parameters = doc_data.get('parameters', {})
+                account_number = doc.get('account_number') or doc.get('account_num')
+                parameters = doc.get('parameters', {})
                 incident_id = parameters.get('incident_id')
                 
-                # Validate required fields
                 if not account_number:
-                    logger.warning(f"Missing 'account_number' in document: {doc_id}. Full document: {doc}")
+                    logger.warning(f"Missing 'account_number' in document: {doc_id}")
                     error_count += 1
                     continue
                 if not incident_id:
-                    logger.warning(f"Missing 'incident_id' in document: {doc_id}. Full document: {doc}")
+                    logger.warning(f"Missing 'incident_id' in document: {doc_id}")
                     error_count += 1
                     continue
                     
-                # Process the case
-                self.process_case(account_number, incident_id)
-                processed_count += 1
-                
+                if self.process_case(account_number, incident_id):
+                    processed_count += 1
+                else:
+                    error_count += 1
+                    
             except Exception as e:
                 error_count += 1
                 logger.error(f"Error processing document {doc_id}: {str(e)}")
@@ -101,13 +119,10 @@ class OrderProcessor:
                 self.process_option_1(documents)
             case 2:
                 logger.info("Option 2 selected - Monitor Payment")
-                # self.process_option_2(documents)
             case 3:
                 logger.info("Option 3 selected - Monitor Payment Cancel")
-                # self.process_option_3(documents)
             case 4:
                 logger.info("Option 4 selected - Close_Monitor_If_No_Transaction")
-                # self.process_option_4(documents)
             case _:
                 logger.warning(f"Invalid option selected: {option}")
 
@@ -116,7 +131,6 @@ class OrderProcessor:
         logger.info("Starting Order Processor")
         while True:
             try:
-                # Get open orders
                 open_orders = self.get_open_orders()
                 
                 if not open_orders:
@@ -126,13 +140,11 @@ class OrderProcessor:
                     
                 logger.info(f"Found {len(open_orders)} open orders")
                 
-                # Get user input
                 option = self.show_menu()
                 if option is None:
                     print("Invalid input. Please enter a number between 1-4.")
                     continue
                 
-                # Process selected option
                 self.process_selected_option(option, open_orders)
                 time.sleep(1)
                 

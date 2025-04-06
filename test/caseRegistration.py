@@ -31,28 +31,27 @@ class IncidentProcessor:
             "Doc_Version": "1.0",
             "Incident_Id": self.incident_id,
             "Account_Num": self.account_num,
-            "Case_ID": "",
-            "Customer_Name": "",
-            "Customer_Ref": "",
-            "Area": "",
-            "BSS_Arrears_amount": 0,
-            "Current_Arrears_Amount": 0,
-            "Action type": "",
-            "Filtered_Reason": "",
-            "Last_Payment_Date": "",
-            "Last_BSS_Reading_Date": "",
-            "Case_Current_Status": "",
-            "Current_Arrears_band": "",
-            "DRC_Commission_Rule": "",
+            "Arrears": "0",
+            "Created_By": "drs_admin",
             "Created_Dtm": now,
-            "Implemented_Dtm": now,
-            "RTOM": "",
-            "Monitor_Months": "",
+            "Incident_Status": "",
+            "Incident_Status_Dtm": now,
+            "Status_Description": "",
+            "File_Name_Dump": "",
+            "Batch_Id": "",
+            "Batch_Id_Tag_Dtm": now,
+            "External_Data_Update_On": now,
+            "Filtered_Reason": "",
+            "Export_On": now,
+            "File_Name_Rejected": "",
+            "Rejected_Reason": "",
+            "Incident_Forwarded_By": "",
+            "Incident_Forwarded_On": now,
             "Contact_Details": [],
             "Product_Details": [],
             "Customer_Details": {},
             "Account_Details": {},
-            "Last_Actions": {  # Added to support get_payment_data
+            "Last_Actions": {
                 "Billed_Seq": "",
                 "Billed_Created": "",
                 "Payment_Seq": "",
@@ -60,26 +59,20 @@ class IncidentProcessor:
                 "Payment_Money": "0",
                 "Billed_Amount": "0"
             },
-            "Ref_Data-temp,Permanent": [],
-            "Case_Status": [],
-            "Remark": [],
-            "Approvals": [],
-            "DRC": [],
-            "RO": [],
-            "RO Requests": [],
-            "RO- Negotiation": [],
-            "RO - Customer details Edit": [],
-            "RO - CPE Collect": [],
-            "Mediation Board": [],
-            "Settlement": [],
-            "Money Transactions": [],
-            "Commission - Bill Payment": [],
-            "Bonus": [],
-            "FTL LOD": [],
-            "Litigation": [],
-            "LOD / Final Reminder": [],
-            "Dispute": [],
-            "Abnormal Stop": []
+            "Marketing_Details": {
+                "ACCOUNT_MANAGER": "",
+                "CONSUMER_MARKET": "",
+                "Informed_To": "",
+                "Informed_On": "1900-01-01T00:00:00"
+            },
+            "Action": "",
+            "Validity_period": "0",
+            "Remark": "",
+            "updatedAt": now,
+            "Rejected_By": "",
+            "Rejected_Dtm": now,
+            "Arrears_Band": "",
+            "Source_Type": ""
         }
 
     def read_customer_details(self):
@@ -100,36 +93,34 @@ class IncidentProcessor:
             seen_products = set()
 
             for row in rows:
-                # Populate Contact_Details
-                if row.get("TECNICAL_CONTACT_EMAIL"):
-                    contact_details_element = {
-                        "Contact_Type": "email",
-                        "Contact": row["TECNICAL_CONTACT_EMAIL"] if "@" in row["TECNICAL_CONTACT_EMAIL"] else "",
-                        "Create_Dtm": row["LOAD_DATE"].isoformat() if row.get("LOAD_DATE") else "",
-                        "Create_By": "drs_admin"
-                    }
-                    self.mongo_data["Contact_Details"].append(contact_details_element)
-
-                if row.get("MOBILE_CONTACT"):
-                    contact_details_element = {
-                        "Contact_Type": "mobile",
-                        "Contact": row["MOBILE_CONTACT"],
-                        "Create_Dtm": row["LOAD_DATE"].isoformat() if row.get("LOAD_DATE") else "",
-                        "Create_By": "drs_admin"
-                    }
-                    self.mongo_data["Contact_Details"].append(contact_details_element)
-
-                if row.get("WORK_CONTACT"):
-                    contact_details_element = {
-                        "Contact_Type": "fix",
-                        "Contact": row["WORK_CONTACT"],
-                        "Create_Dtm": row["LOAD_DATE"].isoformat() if row.get("LOAD_DATE") else "",
-                        "Create_By": "drs_admin"
-                    }
-                    self.mongo_data["Contact_Details"].append(contact_details_element)
-
-                # Populate Customer_Details (only once)
                 if not self.mongo_data["Customer_Details"]:
+                    if row.get("TECNICAL_CONTACT_EMAIL"):
+                        contact_details_element = {
+                            "Contact_Type": "email",
+                            "Contact": row["TECNICAL_CONTACT_EMAIL"] if "@" in row["TECNICAL_CONTACT_EMAIL"] else "",
+                            "Create_Dtm": row["LOAD_DATE"].isoformat() if row.get("LOAD_DATE") else "",
+                            "Create_By": "drs_admin"
+                        }
+                        self.mongo_data["Contact_Details"].append(contact_details_element)
+
+                    if row.get("MOBILE_CONTACT"):
+                        contact_details_element = {
+                            "Contact_Type": "mobile",
+                            "Contact": row["MOBILE_CONTACT"],
+                            "Create_Dtm": row["LOAD_DATE"].isoformat() if row.get("LOAD_DATE") else "",
+                            "Create_By": "drs_admin"
+                        }
+                        self.mongo_data["Contact_Details"].append(contact_details_element)
+
+                    if row.get("WORK_CONTACT"):
+                        contact_details_element = {
+                            "Contact_Type": "fix",
+                            "Contact": row["WORK_CONTACT"],
+                            "Create_Dtm": row["LOAD_DATE"].isoformat() if row.get("LOAD_DATE") else "",
+                            "Create_By": "drs_admin"
+                        }
+                        self.mongo_data["Contact_Details"].append(contact_details_element)
+
                     self.mongo_data["Customer_Details"] = {
                         "Customer_Name": row.get("CONTACT_PERSON", ""),
                         "Company_Name": "",
@@ -142,7 +133,6 @@ class IncidentProcessor:
                         "Customer_Type": row.get("CUSTOMER_TYPE", "")
                     }
 
-                    # Populate Account_Details (only once)
                     self.mongo_data["Account_Details"] = {
                         "Account_Status": row.get("ACCOUNT_STATUS_BSS", ""),
                         "Acc_Effective_Dtm": row["ACCOUNT_EFFECTIVE_DTM_BSS"].isoformat() if row.get("ACCOUNT_EFFECTIVE_DTM_BSS") else "",
@@ -157,7 +147,16 @@ class IncidentProcessor:
                         "Last_Rated_Dtm": "1900-01-01T00:00:00"
                     }
 
-                # Populate Product_Details
+                    if row.get("LAST_PAYMENT_DAT"):
+                        self.mongo_data["Last_Actions"] = {
+                            "Billed_Seq": str(row.get("LAST_BILL_SEQ", "")),
+                            "Billed_Created": row["LAST_BILL_DTM"].isoformat() if row.get("LAST_BILL_DTM") else "",
+                            "Payment_Seq": "",
+                            "Payment_Created": row["LAST_PAYMENT_DAT"].isoformat() if row.get("LAST_PAYMENT_DAT") else "",
+                            "Payment_Money": str(float(row["LAST_PAYMENT_MNY"])) if row.get("LAST_PAYMENT_MNY") else "0",
+                            "Billed_Amount": str(float(row["LAST_PAYMENT_MNY"])) if row.get("LAST_PAYMENT_MNY") else "0"
+                        }
+
                 product_id = row.get("ASSET_ID")
                 if product_id and product_id not in seen_products:
                     seen_products.add(product_id)
