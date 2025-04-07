@@ -4,6 +4,9 @@ from .caseRegistration import IncidentProcessor
 from utils.logger.logger import get_logger
 
 logger = get_logger("task_status_logger")
+if len(logger.handlers) > 1:  # Remove duplicates
+    logger.handlers = [logger.handlers[0]]  # Keep first handler
+logger.propagate = False  # Stop propagation
 
 class OrderProcessor:
     def __init__(self):

@@ -3,7 +3,7 @@ import configparser
 from utils.logger.logger import get_logger
 from utils.filePath.filePath import get_filePath
 
-logger = get_logger("connectSQL")
+logger = get_logger("task_status_logger")
 
 def get_mysql_connection():
     """
