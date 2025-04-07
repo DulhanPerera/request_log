@@ -9,20 +9,36 @@ from utils.logger.logger import get_logger
 from utils.api.connectAPI import read_api_config
 from utils.custom_exceptions.customize_exceptions import APIConfigError, IncidentCreationError
 
+# Initialize logger for tracking task status
 logger = get_logger("task_status_logger")
-if len(logger.handlers) > 1:  # Remove duplicates
-    logger.handlers = [logger.handlers[0]]  # Keep first handler
-logger.propagate = False  # Stop propagation
 
 class IncidentProcessor:
+    """
+    A class to process incident data by retrieving customer information from MySQL,
+    formatting it into a standardized JSON structure, and sending it to an API endpoint.
+    """
     
     def __init__(self, account_num, incident_id, mongo_collection):
+        """
+        Initialize the IncidentProcessor with account details and MongoDB collection.
+        
+        Args:
+            account_num (str): The account number to process
+            incident_id (int): The incident ID associated with this account
+            mongo_collection: MongoDB collection where data will be stored
+        """
         self.account_num = str(account_num)
         self.incident_id = int(incident_id)
         self.collection = mongo_collection
-        self.mongo_data = self.initialize_mongo_doc()
+        self.mongo_data = self.initialize_mongo_doc()  # Initialize document structure
 
     def initialize_mongo_doc(self):
+        """
+        Creates and returns a standardized MongoDB document structure with default values.
+        
+        Returns:
+            dict: A dictionary representing the initial MongoDB document structure
+        """
         now = datetime.now().replace(microsecond=0).isoformat() + ".000Z"
         return {
             "Doc_Version": 1,
@@ -63,11 +79,33 @@ class IncidentProcessor:
             "Rejected_By": "",
             "Rejected_Dtm": now,
             "Arrears_Band": "",
-            "Source_Type": ""
+            "Source_Type": "",
+            "DRC": [],
+            "RO": [],
+            "RO Requests": [],
+            "RO- Negotiation": [],
+            "RO - Customer details Edit": [],
+            "RO - CPE Collect": [],
+            "Mediation Board": [],
+            "Settlement": [],
+            "Money Transactions": [],
+            "Commission - Bill Payment": [],
+            "Bonus": [],
+            "FTL LOD": [],
+            "Litigation": [],
+            "LOD / Final Reminder": [],
+            "Dispute": [],
+            "Abnormal Stop": []
         }
 
     def read_customer_details(self):
-        """Retrieves and processes customer account data from MySQL"""
+        """
+        Retrieves and processes customer account data from MySQL database.
+        Populates contact details, customer details, account details, and product details.
+        
+        Returns:
+            str: "success" if operation completed successfully, "error" otherwise
+        """
         mysql_conn = None
         cursor = None
         try:
@@ -77,15 +115,16 @@ class IncidentProcessor:
                 logger.error("MySQL connection failed. Skipping customer details retrieval.")
                 return "error"
             
+            # Execute query to fetch customer details
             cursor = mysql_conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute(f"SELECT * FROM debt_cust_detail WHERE ACCOUNT_NUM = '{self.account_num}'")
             rows = cursor.fetchall()
 
-            seen_products = set()
-            seen_contacts = set()
+            seen_products = set()  # Track unique products
+            seen_contacts = set()  # Track unique contacts
 
             for row in rows:
-                # Normalize date for Contact_Details
+                # Normalize date formats for Contact_Details
                 load_date = row.get("LOAD_DATE")
                 if load_date:
                     if isinstance(load_date, str):  # Handle string input
@@ -96,6 +135,7 @@ class IncidentProcessor:
                 else:
                     load_date_str = "1900-01-01T00:00:00.000Z"
 
+                # Process email contact if present and valid
                 if row.get("TECNICAL_CONTACT_EMAIL"):
                     email = row["TECNICAL_CONTACT_EMAIL"] if "@" in row["TECNICAL_CONTACT_EMAIL"] else ""
                     contact_key = ("email", email)
@@ -108,6 +148,7 @@ class IncidentProcessor:
                             "Create_By": "drs_admin"
                         })
 
+                # Process mobile contact if present
                 if row.get("MOBILE_CONTACT"):
                     mobile = row["MOBILE_CONTACT"]
                     contact_key = ("mobile", mobile)
@@ -120,6 +161,7 @@ class IncidentProcessor:
                             "Create_By": "drs_admin"
                         })
 
+                # Process work contact if present
                 if row.get("WORK_CONTACT"):
                     work = row["WORK_CONTACT"]
                     contact_key = ("fix", work)
@@ -132,7 +174,7 @@ class IncidentProcessor:
                             "Create_By": "drs_admin"
                         })
 
-                # Customer_Details
+                # Populate Customer_Details if empty (only need to do this once)
                 if not self.mongo_data["Customer_Details"]:
                     self.mongo_data["Customer_Details"] = {
                         "Customer_Name": row.get("CONTACT_PERSON", ""),
@@ -146,7 +188,7 @@ class IncidentProcessor:
                         "Customer_Type": row.get("CUSTOMER_TYPE", "")
                     }
 
-                    # Account_Details with normalized date
+                    # Process account effective date for Account_Details
                     acc_eff_dtm = row.get("ACCOUNT_EFFECTIVE_DTM_BSS")
                     if acc_eff_dtm:
                         if isinstance(acc_eff_dtm, str):
@@ -171,7 +213,7 @@ class IncidentProcessor:
                         "Last_Rated_Dtm": "1900-01-01T00:00:00.000Z"
                     }
 
-                # Product_Details with normalized date
+                # Process product effective date
                 eff_dtm = row.get("ACCOUNT_EFFECTIVE_DTM_BSS")
                 if eff_dtm:
                     if isinstance(eff_dtm, str):
@@ -182,6 +224,7 @@ class IncidentProcessor:
                 else:
                     eff_dtm_str = "1900-01-01T00:00:00.000Z"
 
+                # Add product details if not already seen
                 product_id = row.get("ASSET_ID")
                 if product_id and product_id not in seen_products:
                     seen_products.add(product_id)
@@ -207,7 +250,7 @@ class IncidentProcessor:
             return "success"
 
         except Exception as e:
-            logger.error(f"Error : {e}")
+            logger.error(f"Error reading customer details: {e}")
             return "error"
         finally:
             if cursor:
@@ -216,7 +259,13 @@ class IncidentProcessor:
                 mysql_conn.close()
 
     def get_payment_data(self):
-        """Retrieves and processes the most recent payment record for the account from MySQL."""
+        """
+        Retrieves the most recent payment record for the account from MySQL.
+        Adds payment information to the Last_Actions array in the document.
+        
+        Returns:
+            str: "success" if payment found, "failure" if no payment found, "error" on exception
+        """
         mysql_conn = None
         cursor = None
         try:
@@ -226,6 +275,7 @@ class IncidentProcessor:
                 logger.error("MySQL connection failed. Skipping payment data retrieval.")
                 return "failure"
             
+            # Query for most recent payment record
             cursor = mysql_conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute(
                 f"SELECT * FROM debt_payment WHERE AP_ACCOUNT_NUMBER = '{self.account_num}' "
@@ -245,6 +295,7 @@ class IncidentProcessor:
                 else:
                     payment_date_str = "1900-01-01T00:00:00.000Z"
 
+                # Add payment information to Last_Actions
                 self.mongo_data["Last_Actions"].append({
                     "Billed_Seq": int(payment.get("ACCOUNT_PAYMENT_SEQ", 0)),
                     "Billed_Created": payment_date_str,
@@ -258,7 +309,7 @@ class IncidentProcessor:
             return "failure"
 
         except Exception as e:
-            logger.error(f"Error : {e}")
+            logger.error(f"Error retrieving payment data: {e}")
             return "failure"
         finally:
             if cursor:
@@ -267,12 +318,26 @@ class IncidentProcessor:
                 mysql_conn.close()
 
     def format_json_object(self):
+        """
+        Converts the MongoDB document structure to properly formatted JSON.
+        Handles special data types like datetime and Decimal.
+        
+        Returns:
+            str: A pretty-printed JSON string of the document data
+        """
         json_data = json.loads(json.dumps(self.mongo_data, default=self.json_serializer()))
+        # Ensure string types for specific fields
         json_data["Customer_Details"]["Nic"] = str(json_data["Customer_Details"].get("Nic", ""))
         json_data["Account_Details"]["Email_Address"] = str(json_data["Account_Details"].get("Email_Address", ""))
         return json.dumps(json_data, indent=4)
 
     def json_serializer(self):
+        """
+        Provides custom serialization for non-JSON-native data types.
+        
+        Returns:
+            function: A function that handles serialization of specific types
+        """
         def _serialize(obj):
             if isinstance(obj, (datetime, date)):
                 if isinstance(obj, date) and not isinstance(obj, datetime):
@@ -286,6 +351,16 @@ class IncidentProcessor:
         return _serialize
 
     def send_to_api(self, json_output, api_url):
+        """
+        Sends the formatted JSON data to the specified API endpoint.
+        
+        Args:
+            json_output (str): The JSON data to send
+            api_url (str): The API URL
+            
+        Returns:
+            dict: The API response if successful, None otherwise
+        """
         logger.info(f"Sending data to API: {api_url}")
         headers = {
             "Content-Type": "application/json",
@@ -301,22 +376,36 @@ class IncidentProcessor:
             return None
 
     def process_incident(self):
+        """
+        Main method to coordinate the entire incident processing workflow:
+        1. Reads customer details from MySQL
+        2. Retrieves payment data
+        3. Formats the data as JSON
+        4. Sends to the API endpoint
+        
+        Returns:
+            tuple: (success_flag, message) where success_flag is boolean and message is str
+        """
         try:
             logger.info(f"Processing incident for account: {self.account_num}, ID: {self.incident_id}")
             
+            # Step 1: Read customer details
             customer_status = self.read_customer_details()
             if customer_status != "success" or not self.mongo_data["Customer_Details"]:
                 error_msg = f"No customer details found for account {self.account_num}"
                 logger.error(error_msg)
                 return False, error_msg
             
+            # Step 2: Get payment data (optional)
             payment_status = self.get_payment_data()
             if payment_status != "success":
                 logger.warning(f"Failed to retrieve payment data for account {self.account_num}")
                 
+            # Step 3: Format as JSON
             json_output = self.format_json_object()
-            print(json_output)
+            print(json_output)  # For debugging
             
+            # Step 4: Get API URL and send data
             api_url = read_api_config()
             if not api_url:
                 raise APIConfigError("Empty API URL in config")
